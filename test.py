@@ -32,7 +32,7 @@ SNAPSHOT_FILE_PREFIX = "snapshot"
 LOG_CSV_FILE = "camera_log.csv"
 
 # 定期的に保存・プッシュする間隔（秒）
-UPDATE_INTERVAL = 20
+UPDATE_INTERVAL = 60
 # ==============================================================================
 
 BASE_DIR = abspath(dirname(__file__))
