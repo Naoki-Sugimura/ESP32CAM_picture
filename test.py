@@ -5,14 +5,17 @@ import sys
 import time
 import subprocess
 import pandas as pd
+import os # osモジュール全体をインポート
 from os.path import join, abspath, dirname, exists
 from datetime import datetime
 
 '''
 このスクリプトは以下の機能を持ちます:
 1. ESP32カメラの映像をリアルタイムで表示します。
-2. 定期的にスナップショット画像とカメラの状態ログ(CSV)を保存します。
-3. 保存した画像とCSVファイルをGitHubに自動でプッシュします。
+2. 最新のスナップショットを常に上書き保存します。
+3. 'log/(月)/(年)' フォルダを自動作成し、過去の写真を日付フォルダに分けてすべて保存します。
+4. カメラの状態ログ(CSV)を保存します。
+5. 保存した画像とCSVファイルをGitHubに自動でプッシュします。
 '''
 
 # ==============================================================================
@@ -23,8 +26,9 @@ ESP32_IP_ADDRESS = "192.168.137.50"
 # 映像ストリームの形式 ("rtsp" または "http")
 STREAM_TYPE = "rtsp"
 
-# ★★★ 変更点: 保存するファイル名の「接頭辞」を設定 ★★★
-SNAPSHOT_FILE_PREFIX = "snapshot"
+# 保存するファイル名
+SNAPSHOT_IMAGE_FILE = "snapshot.jpg" # 上書きされる最新のスナップショット名
+SNAPSHOT_FILE_PREFIX = "snapshot"    # アーカイブ保存時のファイル名の接頭辞
 LOG_CSV_FILE = "camera_log.csv"
 
 # 定期的に保存・プッシュする間隔（秒）
@@ -71,9 +75,6 @@ class ESP32Getter():
 
 # === CSVログを更新する関数 (変更なし) ===
 def update_log_csv(status: str, ip: str, image_file: str):
-    """
-    カメラの状態をCSVファイルに追記する
-    """
     print("[CSV] ログファイルを更新します...")
     try:
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -82,35 +83,23 @@ def update_log_csv(status: str, ip: str, image_file: str):
             new_log.to_csv(CSV_PATH, index=False, encoding='utf-8-sig')
             print(f"[CSV] {LOG_CSV_FILE} を新規作成しました。")
         else:
-            new_log.to_csv(CSV_PATH, mode='a', header=False, index=False, encoding='utf--sig')
+            new_log.to_csv(CSV_PATH, mode='a', header=False, index=False, encoding='utf-8-sig')
             print(f"[CSV] {LOG_CSV_FILE} に情報を追記しました。")
     except PermissionError:
-        # ★★★ 改善点: パーミッションエラーの場合に分かりやすいメッセージを表示 ★★★
         print(f"[CSV ERROR] 書き込みが拒否されました。'{LOG_CSV_FILE}'がExcelなどで開かれていないか確認してください。")
     except Exception as e:
         print(f"[CSV ERROR] CSVファイルの書き込みに失敗しました: {e}")
 
 
-# === Gitへコミットとプッシュを行う関数 ===
+# === Gitへコミットとプッシュを行う関数 (変更なし) ===
 def git_commit_and_push():
-    """
-    ★★★ 改善点: フォルダ内のすべての変更をGitにコミットし、プッシュする ★★★
-    """
     print("[GIT] GitHubへ変更をプッシュします...")
     try:
         commit_message = f"Auto-update: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-        
-        # 1. git add . (カレントディレクトリのすべての変更を追加)
         subprocess.run(["git", "add", "."], check=True, cwd=BASE_DIR)
-        
-        # 2. git commit
         subprocess.run(["git", "commit", "-m", commit_message], check=True, cwd=BASE_DIR)
-        
-        # 3. git push
         subprocess.run(["git", "push", "origin", "main"], check=True, cwd=BASE_DIR)
-        
         print("[GIT] Push 成功！")
-
     except FileNotFoundError:
          print("[GIT ERROR] 'git'コマンドが見つかりません。Gitがインストールされ、PATHが通っているか確認してください。")
     except subprocess.CalledProcessError as e:
@@ -138,24 +127,42 @@ if __name__ == '__main__':
             print("[WARN] フレームを取得できませんでした。カメラとの接続を確認してください。")
             camera_status = "OFFLINE"
             time.sleep(1)
-            continue # フレームがなければ以降の処理はスキップ
+            continue
 
         if time.monotonic() - last_update_time >= UPDATE_INTERVAL:
             print(f"\n--- 定期処理開始 ({datetime.now().strftime('%H:%M:%S')}) ---")
             
-            # ★★★ 変更点: タイムスタンプ付きのユニークなファイル名を生成 ★★★
-            timestamp_str = datetime.now().strftime('%Y%m%d_%H%M%S')
-            unique_image_file = f"{SNAPSHOT_FILE_PREFIX}_{timestamp_str}.jpg"
-            unique_image_path = join(BASE_DIR, unique_image_file)
+            # 1. 最新のスナップショットを常に上書き保存
+            main_snapshot_path = join(BASE_DIR, SNAPSHOT_IMAGE_FILE)
+            cv2.imwrite(main_snapshot_path, frame)
+            print(f"[SAVE] {SNAPSHOT_IMAGE_FILE} を更新しました。")
+
+            # ★★★ 変更点: 過去ログとして日付フォルダに別名保存（フォルダは自動作成） ★★★
+            now = datetime.now()
+            year_str = now.strftime('%Y')
+            month_str = now.strftime('%m')
+
+            # 保存先フォルダパスを作成: log/(月)/(年)
+            archive_dir_path = join(BASE_DIR, "log", month_str, year_str)
+            os.makedirs(archive_dir_path, exist_ok=True) # フォルダがなければ再帰的に作成
+
+            # タイムスタンプ付きのファイル名を生成
+            timestamp_str = now.strftime('%Y%m%d_%H%M%S')
+            archive_filename = f"{SNAPSHOT_FILE_PREFIX}_{timestamp_str}.jpg"
+            archive_full_path = join(archive_dir_path, archive_filename)
             
-            # 画像をユニークな名前で保存
-            cv2.imwrite(unique_image_path, frame)
-            print(f"[SAVE] {unique_image_file} を保存しました。")
+            # 画像をアーカイブフォルダに保存
+            cv2.imwrite(archive_full_path, frame)
             
-            # CSVログを更新 (ユニークなファイル名を渡す)
-            update_log_csv(camera_status, ESP32_IP_ADDRESS, unique_image_file)
+            # ログ出力用の相対パスを作成
+            relative_archive_dir = join("log", month_str, year_str).replace(os.sep, '/')
+            print(f"[ARCHIVE] {archive_filename} を {relative_archive_dir} に保存しました。")
             
-            # Gitへプッシュ (フォルダ内のすべての変更が対象)
+            # CSVログを更新 (CSVには相対パスを記録)
+            csv_record_path = join(relative_archive_dir, archive_filename).replace(os.sep, '/')
+            update_log_csv(camera_status, ESP32_IP_ADDRESS, csv_record_path)
+            
+            # Gitへプッシュ
             git_commit_and_push()
 
             last_update_time = time.monotonic()
