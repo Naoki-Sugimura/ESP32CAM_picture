@@ -72,28 +72,20 @@ class ESP32Getter():
         cv2.destroyAllWindows()
 
 
-# === ★★★ 変更点: CSVログを更新する関数 ★★★ ===
+# === CSVログを更新する関数 (変更なし) ===
 def update_log_csv(status: str, ip: str, image_file: str):
-    """
-    カメラの状態をCSVファイルに記録する。新しいデータが一番上に来るようにする。
-    """
     print("[CSV] ログファイルを更新します...")
     try:
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         new_log_df = pd.DataFrame([{"timestamp": timestamp, "camera_ip": ip, "status": status, "snapshot_file": image_file}])
-
-        # CSVファイルが存在する場合
         if exists(CSV_PATH):
             existing_df = pd.read_csv(CSV_PATH)
-            # 新しいデータを上に結合
             combined_df = pd.concat([new_log_df, existing_df], ignore_index=True)
             combined_df.to_csv(CSV_PATH, index=False, encoding='utf-8-sig')
             print(f"[CSV] {LOG_CSV_FILE} の先頭に情報を追記しました。")
-        # CSVファイルが存在しない場合
         else:
             new_log_df.to_csv(CSV_PATH, index=False, encoding='utf-8-sig')
             print(f"[CSV] {LOG_CSV_FILE} を新規作成しました。")
-
     except PermissionError:
         print(f"[CSV ERROR] 書き込みが拒否されました。'{LOG_CSV_FILE}'がExcelなどで開かれていないか確認してください。")
     except Exception as e:
@@ -131,7 +123,7 @@ if __name__ == '__main__':
         camera_status = "ONLINE"
 
         if frame is not None:
-            cv2.imshow("ESP32 Camera Stream", frame)
+            cv2.imshow("ESP32 Camera Stream (Live)", frame)
         else:
             print("[WARN] フレームを取得できませんでした。カメラとの接続を確認してください。")
             camera_status = "OFFLINE"
@@ -141,34 +133,36 @@ if __name__ == '__main__':
         if time.monotonic() - last_update_time >= UPDATE_INTERVAL:
             print(f"\n--- 定期処理開始 ({datetime.now().strftime('%H:%M:%S')}) ---")
             
-            # 1. 最新のスナップショットを常に上書き保存
             main_snapshot_path = join(BASE_DIR, SNAPSHOT_IMAGE_FILE)
             cv2.imwrite(main_snapshot_path, frame)
             print(f"[SAVE] {SNAPSHOT_IMAGE_FILE} を更新しました。")
 
-            # 2. 過去ログとして日付フォルダに別名保存
+            # ★★★ 確認用の処理を追加 ★★★
+            # 保存したばかりのファイルをディスクから読み込んで、更新されているか確認する
+            try:
+                saved_frame = cv2.imread(main_snapshot_path)
+                if saved_frame is not None:
+                    # 確認用の別ウィンドウに表示
+                    cv2.imshow("Saved Snapshot (from file)", saved_frame)
+                else:
+                    print("[VERIFY] 確認用の画像読み込みに失敗しました。")
+            except Exception as e:
+                print(f"[VERIFY ERROR] 確認処理中にエラーが発生: {e}")
+            
+            # --- ここから下のアーカイブ保存、CSV、Git処理は変更なし ---
             now = datetime.now()
             year_str = now.strftime('%Y')
             month_str = now.strftime('%m')
-
-            # ★★★ 変更点: 保存先フォルダパスを log/(年)/(月) に変更 ★★★
-            # archive_dir_path = join(BASE_DIR, "log", year_str, month_str)
-            # os.makedirs(archive_dir_path, exist_ok=True)
-
-            # timestamp_str = now.strftime('%Y%m%d_%H%M%S')
-            # archive_filename = f"{SNAPSHOT_FILE_PREFIX}_{timestamp_str}.jpg"
-            # archive_full_path = join(archive_dir_path, archive_filename)
-            
-            # cv2.imwrite(archive_full_path, frame)
-            
-            # relative_archive_dir = join("log", year_str, month_str).replace(os.sep, '/')
-            # print(f"[ARCHIVE] {archive_filename} を {relative_archive_dir} に保存しました。")
-            
-            # # 3. CSVログを更新
-            # csv_record_path = join(relative_archive_dir, archive_filename).replace(os.sep, '/')
-            # update_log_csv(camera_status, ESP32_IP_ADDRESS, csv_record_path)
-            
-            # 4. Gitへプッシュ
+            archive_dir_path = join(BASE_DIR, "log", year_str, month_str)
+            os.makedirs(archive_dir_path, exist_ok=True)
+            timestamp_str = now.strftime('%Y%m%d_%H%M%S')
+            archive_filename = f"{SNAPSHOT_FILE_PREFIX}_{timestamp_str}.jpg"
+            archive_full_path = join(archive_dir_path, archive_filename)
+            cv2.imwrite(archive_full_path, frame)
+            relative_archive_dir = join("log", year_str, month_str).replace(os.sep, '/')
+            print(f"[ARCHIVE] {archive_filename} を {relative_archive_dir} に保存しました。")
+            csv_record_path = join(relative_archive_dir, archive_filename).replace(os.sep, '/')
+            update_log_csv(camera_status, ESP32_IP_ADDRESS, csv_record_path)
             git_commit_and_push()
 
             last_update_time = time.monotonic()
