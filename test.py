@@ -5,7 +5,7 @@ import sys
 import time
 import subprocess
 import pandas as pd
-import os # osモジュール全体をインポート
+import os
 from os.path import join, abspath, dirname, exists
 from datetime import datetime
 
@@ -13,8 +13,8 @@ from datetime import datetime
 このスクリプトは以下の機能を持ちます:
 1. ESP32カメラの映像をリアルタイムで表示します。
 2. 最新のスナップショットを常に上書き保存します。
-3. 'log/(月)/(年)' フォルダを自動作成し、過去の写真を日付フォルダに分けてすべて保存します。
-4. カメラの状態ログ(CSV)を保存します。
+3. 'log/(年)/(月)' フォルダを自動作成し、過去の写真を日付フォルダに分けてすべて保存します。
+4. カメラの状態ログ(CSV)を保存します（新しいものが一番上に来るように）。
 5. 保存した画像とCSVファイルをGitHubに自動でプッシュします。
 '''
 
@@ -27,15 +27,14 @@ ESP32_IP_ADDRESS = "192.168.137.50"
 STREAM_TYPE = "rtsp"
 
 # 保存するファイル名
-SNAPSHOT_IMAGE_FILE = "snapshot.jpg" # 上書きされる最新のスナップショット名
-SNAPSHOT_FILE_PREFIX = "snapshot"    # アーカイブ保存時のファイル名の接頭辞
+SNAPSHOT_IMAGE_FILE = "snapshot.jpg"
+SNAPSHOT_FILE_PREFIX = "snapshot"
 LOG_CSV_FILE = "camera_log.csv"
 
 # 定期的に保存・プッシュする間隔（秒）
-UPDATE_INTERVAL = 10
+UPDATE_INTERVAL = 20
 # ==============================================================================
 
-# --- ファイルパスを自動生成 ---
 BASE_DIR = abspath(dirname(__file__))
 CSV_PATH = join(BASE_DIR, LOG_CSV_FILE)
 
@@ -73,18 +72,28 @@ class ESP32Getter():
         cv2.destroyAllWindows()
 
 
-# === CSVログを更新する関数 (変更なし) ===
+# === ★★★ 変更点: CSVログを更新する関数 ★★★ ===
 def update_log_csv(status: str, ip: str, image_file: str):
+    """
+    カメラの状態をCSVファイルに記録する。新しいデータが一番上に来るようにする。
+    """
     print("[CSV] ログファイルを更新します...")
     try:
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        new_log = pd.DataFrame([{"timestamp": timestamp, "camera_ip": ip, "status": status, "snapshot_file": image_file}])
-        if not exists(CSV_PATH):
-            new_log.to_csv(CSV_PATH, index=False, encoding='utf-8-sig')
-            print(f"[CSV] {LOG_CSV_FILE} を新規作成しました。")
+        new_log_df = pd.DataFrame([{"timestamp": timestamp, "camera_ip": ip, "status": status, "snapshot_file": image_file}])
+
+        # CSVファイルが存在する場合
+        if exists(CSV_PATH):
+            existing_df = pd.read_csv(CSV_PATH)
+            # 新しいデータを上に結合
+            combined_df = pd.concat([new_log_df, existing_df], ignore_index=True)
+            combined_df.to_csv(CSV_PATH, index=False, encoding='utf-8-sig')
+            print(f"[CSV] {LOG_CSV_FILE} の先頭に情報を追記しました。")
+        # CSVファイルが存在しない場合
         else:
-            new_log.to_csv(CSV_PATH, mode='a', header=False, index=False, encoding='utf-8-sig')
-            print(f"[CSV] {LOG_CSV_FILE} に情報を追記しました。")
+            new_log_df.to_csv(CSV_PATH, index=False, encoding='utf-8-sig')
+            print(f"[CSV] {LOG_CSV_FILE} を新規作成しました。")
+
     except PermissionError:
         print(f"[CSV ERROR] 書き込みが拒否されました。'{LOG_CSV_FILE}'がExcelなどで開かれていないか確認してください。")
     except Exception as e:
@@ -137,32 +146,29 @@ if __name__ == '__main__':
             cv2.imwrite(main_snapshot_path, frame)
             print(f"[SAVE] {SNAPSHOT_IMAGE_FILE} を更新しました。")
 
-            # ★★★ 変更点: 過去ログとして日付フォルダに別名保存（フォルダは自動作成） ★★★
+            # 2. 過去ログとして日付フォルダに別名保存
             now = datetime.now()
             year_str = now.strftime('%Y')
             month_str = now.strftime('%m')
 
-            # 保存先フォルダパスを作成: log/(月)/(年)
-            archive_dir_path = join(BASE_DIR, "log", month_str, year_str)
-            os.makedirs(archive_dir_path, exist_ok=True) # フォルダがなければ再帰的に作成
+            # ★★★ 変更点: 保存先フォルダパスを log/(年)/(月) に変更 ★★★
+            archive_dir_path = join(BASE_DIR, "log", year_str, month_str)
+            os.makedirs(archive_dir_path, exist_ok=True)
 
-            # タイムスタンプ付きのファイル名を生成
             timestamp_str = now.strftime('%Y%m%d_%H%M%S')
             archive_filename = f"{SNAPSHOT_FILE_PREFIX}_{timestamp_str}.jpg"
             archive_full_path = join(archive_dir_path, archive_filename)
             
-            # 画像をアーカイブフォルダに保存
             cv2.imwrite(archive_full_path, frame)
             
-            # ログ出力用の相対パスを作成
-            relative_archive_dir = join("log", month_str, year_str).replace(os.sep, '/')
+            relative_archive_dir = join("log", year_str, month_str).replace(os.sep, '/')
             print(f"[ARCHIVE] {archive_filename} を {relative_archive_dir} に保存しました。")
             
-            # CSVログを更新 (CSVには相対パスを記録)
+            # 3. CSVログを更新
             csv_record_path = join(relative_archive_dir, archive_filename).replace(os.sep, '/')
             update_log_csv(camera_status, ESP32_IP_ADDRESS, csv_record_path)
             
-            # Gitへプッシュ
+            # 4. Gitへプッシュ
             git_commit_and_push()
 
             last_update_time = time.monotonic()
