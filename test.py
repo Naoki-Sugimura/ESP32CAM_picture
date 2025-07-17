@@ -152,21 +152,21 @@ if __name__ == '__main__':
             month_str = now.strftime('%m')
 
             # ★★★ 変更点: 保存先フォルダパスを log/(年)/(月) に変更 ★★★
-            archive_dir_path = join(BASE_DIR, "log", year_str, month_str)
-            os.makedirs(archive_dir_path, exist_ok=True)
+            # archive_dir_path = join(BASE_DIR, "log", year_str, month_str)
+            # os.makedirs(archive_dir_path, exist_ok=True)
 
-            timestamp_str = now.strftime('%Y%m%d_%H%M%S')
-            archive_filename = f"{SNAPSHOT_FILE_PREFIX}_{timestamp_str}.jpg"
-            archive_full_path = join(archive_dir_path, archive_filename)
+            # timestamp_str = now.strftime('%Y%m%d_%H%M%S')
+            # archive_filename = f"{SNAPSHOT_FILE_PREFIX}_{timestamp_str}.jpg"
+            # archive_full_path = join(archive_dir_path, archive_filename)
             
-            cv2.imwrite(archive_full_path, frame)
+            # cv2.imwrite(archive_full_path, frame)
             
-            relative_archive_dir = join("log", year_str, month_str).replace(os.sep, '/')
-            print(f"[ARCHIVE] {archive_filename} を {relative_archive_dir} に保存しました。")
+            # relative_archive_dir = join("log", year_str, month_str).replace(os.sep, '/')
+            # print(f"[ARCHIVE] {archive_filename} を {relative_archive_dir} に保存しました。")
             
-            # 3. CSVログを更新
-            csv_record_path = join(relative_archive_dir, archive_filename).replace(os.sep, '/')
-            update_log_csv(camera_status, ESP32_IP_ADDRESS, csv_record_path)
+            # # 3. CSVログを更新
+            # csv_record_path = join(relative_archive_dir, archive_filename).replace(os.sep, '/')
+            # update_log_csv(camera_status, ESP32_IP_ADDRESS, csv_record_path)
             
             # 4. Gitへプッシュ
             git_commit_and_push()
